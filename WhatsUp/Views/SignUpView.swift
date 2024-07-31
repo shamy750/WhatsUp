@@ -20,23 +20,32 @@ struct SignUpView: View {
     @State var showAlert: Bool = false
     @State var isSignedIn: Bool = false
     @State var currentUserId : String = ""
+    @State var loggenUserName: [UserDetails] = [UserDetails]()
     
     @State private var userDetails = [UserDetails]()
-    
     
     let db = Firestore.firestore()
     
     var body: some View {
         NavigationView {
-            if (isSignedIn) {
-                MainView(userDetails: userDetails, currentUserId: currentUserId)
+            if isSignedIn {
+                TabView {
+                    ContactListView(userDetails: userDetails, currentUserId: currentUserId)
+                        .tabItem {
+                            Label("Chat", systemImage: "message")
+                        }
+                    
+                    SettingsView(user: userDetails.filter { $0.userId == currentUserId }, signOutAction: signOut)
+                    .tabItem {
+                        Label("Settings", systemImage: "gear")
+                    }
+                }
             } else {
                 ZStack {
-                    
                     LinearGradient(gradient: Gradient(colors: [Color.black, Color.purple]), startPoint: .top, endPoint: .bottom)
                         .ignoresSafeArea()
+                    
                     VStack {
-                        
                         Image("ChatImage")
                             .resizable()
                             .cornerRadius(10)
@@ -49,7 +58,7 @@ struct SignUpView: View {
                             .font(.largeTitle)
                             .foregroundStyle(Color.white)
                         
-                        if (!isSignedUp) {
+                        if !isSignedUp {
                             CustomTextField(placeholder: "Name", text: $userName)
                                 .padding(.bottom, 10)
                         }
@@ -73,8 +82,15 @@ struct SignUpView: View {
                         .background(Color.black)
                         .cornerRadius(10)
                         .foregroundColor(Color.white)
+                        Button(action: {
+                            isSignedUp = !isSignedUp
+                        }, label: {Text(isSignedUp ? "SignUp" : "SignIn" )})
                     }
                     .padding()
+                }
+                .onAppear {
+                    fetchUsers()
+                    checkLoginState()
                 }
                 .alert(isPresented: $showAlert) {
                     Alert(
@@ -85,69 +101,114 @@ struct SignUpView: View {
                 }
             }
         }
-        
+        .navigationBarBackButtonHidden(true)
     }
     
     func createNewUser(name: String, email: String, pass: String, completionHandler: @escaping (_ result: Bool, _ errorMessage: String) -> Void) {
-        
-        Auth.auth().createUser(withEmail: email, password: pass) { authResult, error in
-            do {
-                if let error = error {
-                    throw error
+        if validateName() {
+            Auth.auth().createUser(withEmail: email, password: pass) { authResult, error in
+                do {
+                    if let error = error {
+                        throw error
+                    }
+                    guard let user = authResult?.user else {
+                        throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "User not found"])
+                    }
+                    
+                    self.db.collection("users").document(user.uid).setData([
+                        "userId": user.uid,
+                        "fullName": name,
+                        "email": email,
+                        "profilePictureURL": ""
+                    ])
+                    completionHandler(true, "Signup is successful")
+                } catch {
+                    completionHandler(false, error.localizedDescription)
+                    print("error signUp : \(error.localizedDescription)")
+                    alert = "error signUp : \(error.localizedDescription)"
+                    showAlert = true
                 }
-                guard let user = authResult?.user else {
-                    throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "User not found"])
-                }
-                
-                try self.db.collection("users").document(user.uid).setData([
-                    "userId": user.uid,
-                    "fullName": name,
-                    "email": email
-                ])
-                completionHandler(true, "Signup is successful")
-            } catch {
-                completionHandler(false, error.localizedDescription)
             }
         }
     }
     
     func signIn(email: String, password: String) {
-        Auth.auth().signIn(withEmail: email , password: password) { authResult, error in
-            
+        Auth.auth().signIn(withEmail: email, password: password) { authResult, error in
             if let error = error {
                 print("Error signing in: \(error.localizedDescription)")
                 alert = "Error signing in: \(error.localizedDescription)"
                 showAlert = true
             } else if let user = authResult?.user {
-                print("User created successfully: \(user.uid)")
-                alert = "User Signed in successfully"
-                showAlert = true
-                isSignedIn =  true
+                isSignedIn = true
                 currentUserId = user.uid
-                fetchMessages()
+                loggenUserName = userDetails.filter { $0.userId == currentUserId }
+                print(loggenUserName, "userddh")
+                setUserDefaults()
+                AppState.shared.isLoggedIn = true
             }
         }
     }
     
-    func fetchMessages() {
+    func validateName() -> Bool {
+        if userName.isEmpty || userName == "" {
+            alert = "Please enter an user Name"
+            showAlert = true
+            return false
+        }
+        return true
+    }
+    
+    func signOut() {
+        do {
+            try Auth.auth().signOut()
+            clearUserDefaults()
+            isSignedIn = false
+        } catch let signOutError as NSError {
+            print("Error signing out: %@", signOutError)
+        }
+    }
+    
+    func setUserDefaults() {
+        UserDefaults.standard.set(currentUserId, forKey: UserDefaultsKeys.userId)
+        UserDefaults.standard.set(email, forKey: UserDefaultsKeys.email)
+        UserDefaults.standard.set(loggenUserName.first?.fullName, forKey: UserDefaultsKeys.fullName)
+        UserDefaults.standard.set(true, forKey: UserDefaultsKeys.isLoggedIn)
+    }
+    
+    func clearUserDefaults() {
+        UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.userId)
+        UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.email)
+        UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.fullName)
+        UserDefaults.standard.set(false, forKey: UserDefaultsKeys.isLoggedIn)
+    }
+    
+    func checkLoginState() {
+        let isLoggedIn = UserDefaults.standard.bool(forKey: UserDefaultsKeys.isLoggedIn)
+        if isLoggedIn && isSignedUp {
+            currentUserId = UserDefaults.standard.string(forKey: UserDefaultsKeys.userId) ?? ""
+            email = UserDefaults.standard.string(forKey: UserDefaultsKeys.email) ?? ""
+            isSignedIn = true
+        }
+    }
+    
+    func fetchUsers() {
         let db = Firestore.firestore()
-        db.collection("users")
-            .addSnapshotListener { querySnapshot, error in
-                if let error = error {
-                    print("Error getting documents: \(error)")
-                } else {
-                    if let querySnapshot = querySnapshot {
-                        do {
-                            userDetails = try querySnapshot.documents.compactMap { document in
-                                try document.data(as: UserDetails.self)
-                            }
-                            print(userDetails)
-                        } catch {
-                            print("Error decoding documents: \(error)")
+        db.collection("users").addSnapshotListener { querySnapshot, error in
+            if let error = error {
+                print("Error getting documents: \(error)")
+            } else {
+                if let querySnapshot = querySnapshot {
+                    do {
+                        userDetails = try querySnapshot.documents.compactMap { document in
+                            try document.data(as: UserDetails.self)
                         }
+                        print(userDetails)
+                    } catch {
+                        print("Error decoding documents: \(error)")
                     }
                 }
             }
+        }
     }
 }
 

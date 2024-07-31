@@ -36,7 +36,7 @@ struct SignInOrSignUpView : View {
                         
                         HStack(spacing: 20) {
                             
-                            NavigationLink(destination: SignUpView()) {
+                            NavigationLink(destination: SignUpView(isSignedUp: false)) {
                                 Text("Sign Up")
                                     .frame(width: 100)
                                     .foregroundColor(Color.white)

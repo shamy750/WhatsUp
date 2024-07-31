@@ -12,12 +12,15 @@ struct UserDetails: Codable, Identifiable {
     var userId: String
     var email: String
     var fullName: String
+    var profilePictureURL: String
 }
 
-struct ChatMessage: Identifiable, Codable {
-    @DocumentID var id: String?
+
+
+struct Message: Identifiable {
+    var id: String = UUID().uuidString
     var senderId: String
     var receiverId: String
-    var text: String
+    var message: String
     var timestamp: Date
 }
